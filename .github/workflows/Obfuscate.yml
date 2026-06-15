@@ -1,17 +1,20 @@
-name: Build Obfuscate BPB Panel
+name: Build And Deploy Obfuscated BPB Panel
 
 on:
   push:
-  schedule:
-        # Runs everyday at 1:00 AM
-        - cron: "0 1 * * *"
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: cloudflare-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
@@ -24,13 +27,11 @@ jobs:
           node-version: "latest"
 
       - name: Install dependencies
-        run: |
-          npm install -g javascript-obfuscator
+        run: npm install -g javascript-obfuscator
 
-      - name: Clone BPB workjs
-        run: |
-          wget -O origin.js https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/refs/heads/main/build/unobfuscated-worker.js
-      
+      - name: Download BPB source worker
+        run: wget -O origin.js https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/refs/heads/main/build/unobfuscated-worker.js
+
       - name: Obfuscate BPB worker js
         run: |
           javascript-obfuscator origin.js --output _worker.js \
@@ -47,10 +48,17 @@ jobs:
           --transform-object-keys true \
           --unicode-escape-sequence true
 
-      - name: Commit changes
+      - name: Commit generated files
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           branch: main
           commit_message: ':arrow_up: update latest bpb panel'
           commit_author: 'github-actions[bot] <github-actions[bot]@users.noreply.github.com>'
-          push_options: '--set-upstream'
+          file_pattern: origin.js _worker.js
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy _worker.js --name ${{ github.event.repository.name }} --compatibility-date 2026-06-16
